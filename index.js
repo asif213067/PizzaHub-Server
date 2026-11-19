@@ -9,6 +9,7 @@ import menuRoutes from './src/routes/menuRoutes.js';
 import orderRoutes from './src/routes/orderRoutes.js';
 import adminRoutes from './src/routes/adminRoutes.js';
 import paymentRoutes from './src/routes/paymentRoutes.js';
+import userRoutes from './src/routes/userRoutes.js';
 
 const app = express();
 const port = process.env.PORT || 5000;
@@ -42,6 +43,7 @@ app.use('/api/menu', menuRoutes);
 app.use('/api/orders', orderRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/payments', paymentRoutes);
+app.use('/api/users', userRoutes);
 
 // Centralized 404 and Error handling middlewares.
 app.use(notFound);
