@@ -10,6 +10,8 @@ import orderRoutes from './src/routes/orderRoutes.js';
 import adminRoutes from './src/routes/adminRoutes.js';
 import paymentRoutes from './src/routes/paymentRoutes.js';
 import userRoutes from './src/routes/userRoutes.js';
+import reviewRoutes from './src/routes/reviewRoutes.js';
+import favoriteRoutes from './src/routes/favoriteRoutes.js';
 
 const app = express();
 const port = process.env.PORT || 5000;
@@ -44,6 +46,8 @@ app.use('/api/orders', orderRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/payments', paymentRoutes);
 app.use('/api/users', userRoutes);
+app.use('/api/reviews', reviewRoutes);
+app.use('/api/favorites', favoriteRoutes);
 
 // Centralized 404 and Error handling middlewares.
 app.use(notFound);

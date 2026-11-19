@@ -308,11 +308,12 @@ export async function updateOrderStatusVendor(req, res, next) {
     const { id } = req.params;
     const { status } = req.body;
 
-    const allowedStatuses = ["accepted", "rejected"];
+    // Vendors can progress an order through its full lifecycle after acceptance.
+    const allowedStatuses = ["accepted", "rejected", "delivered", "completed"];
     if (!status || !allowedStatuses.includes(status)) {
       return res.status(400).json({
         success: false,
-        message: 'Status must be either "accepted" or "rejected"',
+        message: 'Status must be one of: "accepted", "rejected", "delivered", "completed"',
       });
     }
 
@@ -341,11 +342,18 @@ export async function updateOrderStatusVendor(req, res, next) {
       });
     }
 
-    // Business rule: vendors can only accept or reject an order while it is pending, and only once.
-    if (order.status !== "pending") {
+    // Define the allowed transitions so vendors cannot skip steps or revert a finalized order.
+    const validTransitions = {
+      pending: ["accepted", "rejected"],
+      accepted: ["delivered"],
+      delivered: ["completed"],
+    };
+
+    const allowed = validTransitions[order.status];
+    if (!allowed || !allowed.includes(status)) {
       return res.status(400).json({
         success: false,
-        message: `Order has already been ${order.status} and cannot be altered again`,
+        message: `Cannot move order from "${order.status}" to "${status}"`,
       });
     }
 

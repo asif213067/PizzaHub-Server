@@ -1,0 +1,29 @@
+import { Router } from 'express';
+import {
+  addReview,
+  getItemReviews,
+  getVendorReviews,
+  updateReview,
+  deleteReview,
+} from '../controllers/reviewController.js';
+import { verifyToken, requireCustomer, requireVendor } from '../middleware/auth.js';
+
+const router = Router();
+
+// Public: anyone can read reviews for a menu item.
+router.get('/item/:itemId', getItemReviews);
+
+// Vendor: view reviews for their own products only.
+router.get('/vendor', verifyToken, requireVendor, getVendorReviews);
+
+// Customer: post a new verified-purchase review.
+router.post('/', verifyToken, requireCustomer, addReview);
+
+// Customer: edit their own review.
+router.patch('/:reviewId', verifyToken, requireCustomer, updateReview);
+
+// Customer (own) or Admin (any): delete a review.
+// Role check is handled inside the controller — both roles share this route.
+router.delete('/:reviewId', verifyToken, deleteReview);
+
+export default router;
