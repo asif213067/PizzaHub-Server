@@ -5,6 +5,7 @@ import { connectDB } from './src/config/db.js';
 import { errorHandler } from './src/middleware/errorHandler.js';
 import { notFound } from './src/middleware/notFound.js';
 import authRoutes from './src/routes/authRoutes.js';
+import menuRoutes from './src/routes/menuRoutes.js';
 
 const app = express();
 const port = process.env.PORT || 5000;
@@ -34,6 +35,7 @@ app.get('/', (req, res) => {
 });
 
 app.use('/api/auth', authRoutes);
+app.use('/api/menu', menuRoutes);
 
 // Centralized 404 and Error handling middlewares.
 app.use(notFound);
