@@ -4,6 +4,7 @@ import cors from 'cors';
 import { connectDB } from './src/config/db.js';
 import { errorHandler } from './src/middleware/errorHandler.js';
 import { notFound } from './src/middleware/notFound.js';
+import authRoutes from './src/routes/authRoutes.js';
 
 const app = express();
 const port = process.env.PORT || 5000;
@@ -31,6 +32,8 @@ app.get('/', (req, res) => {
     message: 'PizzaHub API is running',
   });
 });
+
+app.use('/api/auth', authRoutes);
 
 // Centralized 404 and Error handling middlewares.
 app.use(notFound);
