@@ -170,6 +170,88 @@ export async function getMenuItemById(req, res, next) {
   }
 }
 
+export async function getRelatedMenuItems(req, res, next) {
+  try {
+    const { id } = req.params;
+    const { limit = 3 } = req.query;
+
+    if (!ObjectId.isValid(id)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid menu item ID',
+      });
+    }
+
+    const menuCol = getCollection('menuItems');
+    const currentItem = await menuCol.findOne({ _id: new ObjectId(id) });
+
+    if (!currentItem) {
+      return res.status(404).json({
+        success: false,
+        message: 'Menu item not found',
+      });
+    }
+
+    const limitNum = Math.max(1, parseInt(limit, 10) || 3);
+    const vendorId = currentItem.vendorId;
+
+    const pipeline = [
+      {
+        $match: {
+          _id: { $ne: currentItem._id },
+          $or: [{ vendorId }, { vendorId: vendorId.toString() }],
+          status: 'approved',
+        },
+      },
+      {
+        $lookup: {
+          from: 'users',
+          localField: 'vendorId',
+          foreignField: '_id',
+          as: 'vendor',
+        },
+      },
+      {
+        $unwind: {
+          path: '$vendor',
+          preserveNullAndEmptyArrays: true,
+        },
+      },
+      {
+        $project: {
+          itemName: 1,
+          category: 1,
+          description: 1,
+          price: 1,
+          location: 1,
+          images: 1,
+          status: 1,
+          createdAt: 1,
+          vendorId: 1,
+          vendor: {
+            _id: '$vendor._id',
+            name: '$vendor.name',
+            businessName: '$vendor.businessName',
+            image: '$vendor.image',
+            subscriptionPlan: '$vendor.subscriptionPlan',
+          },
+        },
+      },
+      { $sort: { createdAt: -1 } },
+      { $limit: limitNum },
+    ];
+
+    const relatedItems = await menuCol.aggregate(pipeline).toArray();
+
+    res.json({
+      success: true,
+      data: relatedItems,
+    });
+  } catch (error) {
+    next(error);
+  }
+}
+
 export async function getVendorMenuItems(req, res, next) {
   try {
     const menuCol = getCollection('menuItems');

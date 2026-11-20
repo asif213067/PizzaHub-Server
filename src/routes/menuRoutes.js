@@ -2,6 +2,7 @@ import { Router } from 'express';
 import {
   getPublicMenuItems,
   getMenuItemById,
+  getRelatedMenuItems,
   getVendorMenuItems,
   createMenuItem,
   updateMenuItem,
@@ -17,6 +18,7 @@ const router = Router();
 router.get('/', getPublicMenuItems);
 router.get('/vendor/my-items', verifyToken, requireVendor, getVendorMenuItems);
 router.get('/admin/all', verifyToken, requireAdmin, getAllMenuItemsAdmin);
+router.get('/:id/related', getRelatedMenuItems);
 router.get('/:id', getMenuItemById);
 
 // Protected mutations
