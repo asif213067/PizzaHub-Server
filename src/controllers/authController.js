@@ -13,7 +13,13 @@ export async function createToken(req, res, next) {
     }
 
     const usersCol = getCollection('users');
-    const user = await usersCol.findOne({ email });
+    let user = await usersCol.findOne({ email });
+
+    // Fallback to Better Auth's default 'user' collection if not in 'users'
+    if (!user) {
+      const userCol = getCollection('user');
+      user = await userCol.findOne({ email });
+    }
 
     if (!user) {
       return res.status(404).json({

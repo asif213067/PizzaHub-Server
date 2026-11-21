@@ -30,7 +30,13 @@ export async function verifyToken(req, res, next) {
       }
     }
 
-    const user = await usersCol.findOne(userQuery);
+    let user = await usersCol.findOne(userQuery);
+
+    // Fallback to Better Auth's default 'user' collection if not in 'users'
+    if (!user) {
+      const userCol = getCollection('user');
+      user = await userCol.findOne(userQuery);
+    }
 
     if (!user) {
       return res.status(401).json({

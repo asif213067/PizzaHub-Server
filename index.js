@@ -41,8 +41,11 @@ app.get('/', (req, res) => {
 });
 
 app.use('/api/auth', authRoutes);
+app.use('/api/v1/auth', authRoutes);
 app.use('/api/menu', menuRoutes);
+app.use('/api/v1/menu', menuRoutes);
 app.use('/api/orders', orderRoutes);
+app.use('/api/v1/orders', orderRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/payments', paymentRoutes);
 app.use('/api/users', userRoutes);
