@@ -312,8 +312,16 @@ export async function createMenuItem(req, res, next) {
 
     // Free tier vendors are strictly limited to at most 3 active/pending menu items.
     if (!isPremium) {
+      const matchVendor = [
+        { vendorId: req.user._id },
+        { vendorId: req.user._id.toString() },
+      ];
+      if (ObjectId.isValid(req.user._id)) {
+        matchVendor.push({ vendorId: new ObjectId(req.user._id) });
+      }
+
       const activeCount = await menuCol.countDocuments({
-        $or: [{ vendorId: req.user._id }, { vendorId: req.user._id.toString() }],
+        $or: matchVendor,
         status: { $in: ['approved', 'pending'] },
       });
 
@@ -326,7 +334,7 @@ export async function createMenuItem(req, res, next) {
     }
 
     const newItem = {
-      vendorId: req.user._id,
+      vendorId: ObjectId.isValid(req.user._id) ? new ObjectId(req.user._id) : req.user._id,
       itemName: itemName.trim(),
       category: category.trim(),
       description: description.trim(),
@@ -334,6 +342,7 @@ export async function createMenuItem(req, res, next) {
       location: location.trim(),
       images: Array.isArray(images) ? images : [images],
       status: 'pending',
+      isActive: true,
       createdAt: new Date(),
     };
 
