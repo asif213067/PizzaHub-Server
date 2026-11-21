@@ -101,17 +101,36 @@ export async function getCustomerOrders(req, res, next) {
     const ordersCol = getCollection("orders");
     const customerId = req.user._id;
 
+    const matchConditions = [
+      { customerId },
+      { customerId: customerId.toString() },
+    ];
+    if (ObjectId.isValid(customerId)) {
+      matchConditions.push({ customerId: new ObjectId(customerId) });
+    }
+
     const pipeline = [
       {
         $match: {
-          $or: [{ customerId }, { customerId: customerId.toString() }],
+          $or: matchConditions,
         },
       },
       {
         $lookup: {
           from: "menuItems",
-          localField: "itemId",
-          foreignField: "_id",
+          let: { oItemId: "$itemId" },
+          pipeline: [
+            {
+              $match: {
+                $expr: {
+                  $or: [
+                    { $eq: ["$_id", "$$oItemId"] },
+                    { $eq: [{ $toString: "$_id" }, { $toString: "$$oItemId" }] },
+                  ],
+                },
+              },
+            },
+          ],
           as: "item",
         },
       },
@@ -124,8 +143,19 @@ export async function getCustomerOrders(req, res, next) {
       {
         $lookup: {
           from: "users",
-          localField: "vendorId",
-          foreignField: "_id",
+          let: { oVendorId: "$vendorId" },
+          pipeline: [
+            {
+              $match: {
+                $expr: {
+                  $or: [
+                    { $eq: ["$_id", "$$oVendorId"] },
+                    { $eq: [{ $toString: "$_id" }, { $toString: "$$oVendorId" }] },
+                  ],
+                },
+              },
+            },
+          ],
           as: "vendor",
         },
       },
