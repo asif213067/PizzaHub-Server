@@ -262,17 +262,36 @@ export async function getVendorOrders(req, res, next) {
     const ordersCol = getCollection("orders");
     const vendorId = req.user._id;
 
+    const matchConditions = [
+      { vendorId },
+      { vendorId: vendorId.toString() },
+    ];
+    if (ObjectId.isValid(vendorId)) {
+      matchConditions.push({ vendorId: new ObjectId(vendorId) });
+    }
+
     const pipeline = [
       {
         $match: {
-          $or: [{ vendorId }, { vendorId: vendorId.toString() }],
+          $or: matchConditions,
         },
       },
       {
         $lookup: {
           from: "menuItems",
-          localField: "itemId",
-          foreignField: "_id",
+          let: { oItemId: "$itemId" },
+          pipeline: [
+            {
+              $match: {
+                $expr: {
+                  $or: [
+                    { $eq: ["$_id", "$$oItemId"] },
+                    { $eq: [{ $toString: "$_id" }, { $toString: "$$oItemId" }] },
+                  ],
+                },
+              },
+            },
+          ],
           as: "item",
         },
       },
@@ -285,15 +304,49 @@ export async function getVendorOrders(req, res, next) {
       {
         $lookup: {
           from: "users",
-          localField: "customerId",
-          foreignField: "_id",
-          as: "customer",
+          let: { oCustId: "$customerId" },
+          pipeline: [
+            {
+              $match: {
+                $expr: {
+                  $or: [
+                    { $eq: ["$_id", "$$oCustId"] },
+                    { $eq: [{ $toString: "$_id" }, { $toString: "$$oCustId" }] },
+                  ],
+                },
+              },
+            },
+          ],
+          as: "customerUsers",
         },
       },
       {
-        $unwind: {
-          path: "$customer",
-          preserveNullAndEmptyArrays: true,
+        $lookup: {
+          from: "user",
+          let: { oCustId: "$customerId" },
+          pipeline: [
+            {
+              $match: {
+                $expr: {
+                  $or: [
+                    { $eq: ["$_id", "$$oCustId"] },
+                    { $eq: [{ $toString: "$_id" }, { $toString: "$$oCustId" }] },
+                  ],
+                },
+              },
+            },
+          ],
+          as: "customerUser",
+        },
+      },
+      {
+        $addFields: {
+          customer: {
+            $ifNull: [
+              { $arrayElemAt: ["$customerUsers", 0] },
+              { $arrayElemAt: ["$customerUser", 0] },
+            ],
+          },
         },
       },
       {

@@ -257,9 +257,17 @@ export async function getVendorMenuItems(req, res, next) {
     const menuCol = getCollection('menuItems');
     const vendorId = req.user._id;
 
+    const matchConditions = [
+      { vendorId },
+      { vendorId: vendorId.toString() },
+    ];
+    if (ObjectId.isValid(vendorId)) {
+      matchConditions.push({ vendorId: new ObjectId(vendorId) });
+    }
+
     const items = await menuCol
       .find({
-        $or: [{ vendorId }, { vendorId: vendorId.toString() }],
+        $or: matchConditions,
       })
       .sort({ createdAt: -1 })
       .toArray();
@@ -373,7 +381,7 @@ export async function updateMenuItem(req, res, next) {
       });
     }
 
-    const { itemName, category, description, price, location, images, status } = req.body;
+    const { itemName, category, description, price, location, images, status, isActive } = req.body;
     const updateDoc = {};
 
     if (itemName !== undefined) updateDoc.itemName = itemName.trim();
@@ -381,6 +389,15 @@ export async function updateMenuItem(req, res, next) {
     if (description !== undefined) updateDoc.description = description.trim();
     if (location !== undefined) updateDoc.location = location.trim();
     if (images !== undefined) updateDoc.images = Array.isArray(images) ? images : [images];
+
+    if (isActive !== undefined) {
+      updateDoc.isActive = Boolean(isActive);
+      if (!updateDoc.isActive && item.status === 'approved') {
+        updateDoc.status = 'inactive';
+      } else if (updateDoc.isActive && item.status === 'inactive') {
+        updateDoc.status = 'approved';
+      }
+    }
 
     if (price !== undefined) {
       const numericPrice = Number(price);
