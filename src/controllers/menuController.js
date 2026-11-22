@@ -434,6 +434,24 @@ export async function updateMenuItem(req, res, next) {
       (isActive === true && (!item.isActive || item.status === 'inactive')) ||
       (status === 'approved' && item.status === 'inactive');
 
+    // Enforce Available status-based restriction on the backend:
+    // Only approved/accepted items can be toggled to active/available by vendors.
+    // If item is pending or rejected, vendor cannot make it active or approved.
+    if (req.user.role === 'vendor' && (isActive === true || status === 'approved')) {
+      if (item.status === 'pending') {
+        return res.status(403).json({
+          success: false,
+          message: 'This item is pending approval and cannot be made available yet',
+        });
+      }
+      if (item.status === 'rejected') {
+        return res.status(403).json({
+          success: false,
+          message: 'This item was rejected and cannot be made available to customers',
+        });
+      }
+    }
+
     if (isReactivating && req.user.role === 'vendor') {
       const isExpired = req.user.subscriptionExpiresAt && new Date(req.user.subscriptionExpiresAt) < new Date();
       const isPremium = req.user.subscriptionPlan === 'premium' && !isExpired;
