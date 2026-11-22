@@ -1,26 +1,80 @@
 import { ObjectId } from 'mongodb';
 import { getCollection } from '../config/db.js';
 
-// Ensures a unique compound index exists so the database itself prevents duplicate reviews,
-// acting as a hard constraint independent of application-level duplicate checks.
+// Ensures unique index on orderId so database itself prevents duplicate reviews per order.
 async function ensureReviewIndex() {
-  const reviewsCol = getCollection('reviews');
-  await reviewsCol.createIndex(
-    { itemId: 1, customerId: 1 },
-    { unique: true, background: true }
-  );
+  try {
+    const reviewsCol = getCollection('reviews');
+    await reviewsCol.createIndex(
+      { orderId: 1 },
+      { unique: true, sparse: true, background: true }
+    );
+  } catch (err) {
+    console.error('Error creating review index:', err);
+  }
+}
+
+// Recalculates and updates rating and numReviews on the menu item.
+export async function updateMenuItemRating(itemId) {
+  try {
+    if (!itemId) return;
+    const reviewsCol = getCollection('reviews');
+    const menuCol = getCollection('menuItems');
+    const objectItemId = typeof itemId === 'string' && ObjectId.isValid(itemId)
+      ? new ObjectId(itemId)
+      : itemId;
+
+    const stats = await reviewsCol.aggregate([
+      {
+        $match: {
+          $or: [
+            { itemId: objectItemId },
+            { itemId: objectItemId.toString() },
+          ],
+        },
+      },
+      {
+        $group: {
+          _id: null,
+          averageRating: { $avg: '$rating' },
+          totalReviews: { $sum: 1 },
+        },
+      },
+    ]).toArray();
+
+    const avg = stats.length > 0 ? Number(stats[0].averageRating.toFixed(2)) : 0;
+    const count = stats.length > 0 ? stats[0].totalReviews : 0;
+
+    await menuCol.updateOne(
+      {
+        $or: [
+          { _id: objectItemId },
+          { _id: objectItemId.toString() },
+        ],
+      },
+      {
+        $set: {
+          rating: avg,
+          numReviews: count,
+          updatedAt: new Date(),
+        },
+      }
+    );
+  } catch (err) {
+    console.error('Error updating menu item rating:', err);
+  }
 }
 
 // ─── CREATE ──────────────────────────────────────────────────────────────────
 
 export async function addReview(req, res, next) {
   try {
-    const { itemId, rating, comment } = req.body;
+    const { orderId, itemId, rating, comment } = req.body;
 
-    if (!itemId || rating === undefined || !comment) {
+    if (rating === undefined || !comment || typeof comment !== 'string' || !comment.trim()) {
       return res.status(400).json({
         success: false,
-        message: 'Missing required fields: itemId, rating, and comment are required',
+        message: 'Rating and comment are required',
       });
     }
 
@@ -32,62 +86,109 @@ export async function addReview(req, res, next) {
       });
     }
 
-    if (!ObjectId.isValid(itemId)) {
+    const ordersCol = getCollection('orders');
+    const reviewsCol = getCollection('reviews');
+    const menuCol = getCollection('menuItems');
+
+    let verifiedOrder = null;
+
+    if (orderId) {
+      if (!ObjectId.isValid(orderId)) {
+        return res.status(400).json({
+          success: false,
+          message: 'Invalid order ID',
+        });
+      }
+
+      verifiedOrder = await ordersCol.findOne({
+        _id: new ObjectId(orderId),
+        $or: [
+          { customerId: req.user._id },
+          { customerId: req.user._id.toString() },
+        ],
+      });
+
+      if (!verifiedOrder) {
+        return res.status(404).json({
+          success: false,
+          message: 'Order not found or does not belong to you',
+        });
+      }
+    } else if (itemId) {
+      if (!ObjectId.isValid(itemId)) {
+        return res.status(400).json({
+          success: false,
+          message: 'Invalid menu item ID',
+        });
+      }
+
+      verifiedOrder = await ordersCol.findOne({
+        $or: [
+          { customerId: req.user._id },
+          { customerId: req.user._id.toString() },
+        ],
+        $or: [
+          { itemId: new ObjectId(itemId) },
+          { itemId: itemId.toString() },
+        ],
+      });
+
+      if (!verifiedOrder) {
+        return res.status(404).json({
+          success: false,
+          message: 'No order found for this item',
+        });
+      }
+    } else {
       return res.status(400).json({
         success: false,
-        message: 'Invalid menu item ID',
+        message: 'orderId or itemId is required',
       });
     }
 
-    const menuCol = getCollection('menuItems');
-    const item = await menuCol.findOne({ _id: new ObjectId(itemId) });
-
-    if (!item) {
-      return res.status(404).json({
+    // Enforce review eligibility on the backend:
+    // Only accepted (or delivered/completed) orders can be reviewed.
+    const orderStatus = (verifiedOrder.status || '').toLowerCase();
+    if (orderStatus !== 'accepted' && orderStatus !== 'delivered' && orderStatus !== 'completed') {
+      return res.status(400).json({
         success: false,
-        message: 'Menu item not found',
+        message: 'This order has not been accepted or fulfilled yet. You can review only accepted orders.',
       });
     }
 
-    // Verified Purchase: the authenticated customer must have a delivered or completed order
-    // for this exact item. req.user._id comes from the live DB via verifyToken — never trusted from body.
-    const ordersCol = getCollection('orders');
-    const verifiedOrder = await ordersCol.findOne({
-      customerId: req.user._id,
-      itemId: item._id,
-      status: { $in: ['delivered', 'completed'] },
+    // Check for duplicate review for this order
+    const existingForOrder = await reviewsCol.findOne({
+      $or: [
+        { orderId: verifiedOrder._id },
+        { orderId: verifiedOrder._id.toString() },
+      ],
     });
 
-    if (!verifiedOrder) {
-      return res.status(403).json({
-        success: false,
-        message: 'You can only review items from your delivered or completed orders',
-      });
-    }
-
-    const reviewsCol = getCollection('reviews');
-
-    // Application-level duplicate guard before the DB unique index fires.
-    const existing = await reviewsCol.findOne({
-      itemId: item._id,
-      customerId: req.user._id,
-    });
-
-    if (existing) {
+    if (existingForOrder) {
       return res.status(409).json({
         success: false,
-        message: 'You have already reviewed this item. Edit your existing review instead.',
+        message: 'You have already reviewed this order.',
       });
     }
 
-    // Ensure the unique index exists (idempotent — MongoDB skips creation if already present).
+    // Ensure index exists
     await ensureReviewIndex();
 
+    // Find the item details for vendor and item ID
+    const targetItemId = verifiedOrder.itemId;
+    const item = await menuCol.findOne({
+      $or: [
+        { _id: new ObjectId(targetItemId) },
+        { _id: targetItemId.toString() },
+      ],
+    });
+
     const newReview = {
-      itemId: item._id,
-      vendorId: item.vendorId,
+      orderId: verifiedOrder._id,
+      itemId: item ? item._id : new ObjectId(targetItemId),
+      vendorId: item ? item.vendorId : verifiedOrder.vendorId,
       customerId: req.user._id,
-      customerName: req.user.name,
+      customerName: req.user.name || 'Valued Customer',
       customerImage: req.user.image || '',
       rating: Math.round(numericRating),
       comment: comment.trim(),
@@ -98,24 +199,26 @@ export async function addReview(req, res, next) {
 
     const result = await reviewsCol.insertOne(newReview);
 
+    // Recalculate and update the menu item's rating and count
+    await updateMenuItemRating(newReview.itemId);
+
     res.status(201).json({
       success: true,
       message: 'Review posted successfully',
       data: { _id: result.insertedId, ...newReview },
     });
   } catch (error) {
-    // MongoDB duplicate key error — unique index caught a race condition the app check missed.
     if (error.code === 11000) {
       return res.status(409).json({
         success: false,
-        message: 'You have already reviewed this item. Edit your existing review instead.',
+        message: 'You have already reviewed this order.',
       });
     }
     next(error);
   }
 }
 
-// ─── READ (public) ────────────────────────────────────────────────────────────
+// ─── READ (public — item reviews) ──────────────────────────────────────────
 
 export async function getItemReviews(req, res, next) {
   try {
@@ -131,14 +234,19 @@ export async function getItemReviews(req, res, next) {
     const reviewsCol = getCollection('reviews');
 
     const reviews = await reviewsCol
-      .find({ itemId: new ObjectId(itemId) })
+      .find({
+        $or: [
+          { itemId: new ObjectId(itemId) },
+          { itemId: itemId.toString() },
+        ],
+      })
       .sort({ createdAt: -1 })
       .toArray();
 
     const totalReviews = reviews.length;
     const averageRating =
       totalReviews > 0
-        ? Number((reviews.reduce((sum, r) => sum + r.rating, 0) / totalReviews).toFixed(1))
+        ? Number((reviews.reduce((sum, r) => sum + r.rating, 0) / totalReviews).toFixed(2))
         : 0;
 
     res.json({
@@ -152,23 +260,80 @@ export async function getItemReviews(req, res, next) {
   }
 }
 
+// ─── READ (single review by orderId) ────────────────────────────────────────
+
+export async function getReviewByOrderId(req, res, next) {
+  try {
+    const { orderId } = req.params;
+
+    if (!ObjectId.isValid(orderId)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid order ID',
+      });
+    }
+
+    const reviewsCol = getCollection('reviews');
+    const review = await reviewsCol.findOne({
+      $or: [
+        { orderId: new ObjectId(orderId) },
+        { orderId: orderId.toString() },
+      ],
+    });
+
+    res.json({
+      success: true,
+      data: review || null,
+    });
+  } catch (error) {
+    next(error);
+  }
+}
+
+// ─── READ (customer — all their own reviews) ────────────────────────────────
+
+export async function getMyReviews(req, res, next) {
+  try {
+    const reviewsCol = getCollection('reviews');
+    const reviews = await reviewsCol
+      .find({
+        $or: [
+          { customerId: req.user._id },
+          { customerId: req.user._id.toString() },
+        ],
+      })
+      .sort({ createdAt: -1 })
+      .toArray();
+
+    res.json({
+      success: true,
+      data: reviews,
+    });
+  } catch (error) {
+    next(error);
+  }
+}
+
 // ─── READ (vendor — own products only) ───────────────────────────────────────
 
 export async function getVendorReviews(req, res, next) {
   try {
     const reviewsCol = getCollection('reviews');
 
-    // Only return reviews for items that belong to the authenticated vendor.
-    // req.user._id is sourced from the live DB — vendors cannot spoof another vendor's ID.
     const reviews = await reviewsCol
-      .find({ vendorId: req.user._id })
+      .find({
+        $or: [
+          { vendorId: req.user._id },
+          { vendorId: req.user._id.toString() },
+        ],
+      })
       .sort({ createdAt: -1 })
       .toArray();
 
     const totalReviews = reviews.length;
     const averageRating =
       totalReviews > 0
-        ? Number((reviews.reduce((sum, r) => sum + r.rating, 0) / totalReviews).toFixed(1))
+        ? Number((reviews.reduce((sum, r) => sum + r.rating, 0) / totalReviews).toFixed(2))
         : 0;
 
     res.json({
@@ -213,7 +378,6 @@ export async function updateReview(req, res, next) {
       });
     }
 
-    // Customers can only edit their own review — never another customer's.
     if (review.customerId.toString() !== req.user._id.toString()) {
       return res.status(403).json({
         success: false,
@@ -249,6 +413,10 @@ export async function updateReview(req, res, next) {
       { $set: updates },
       { returnDocument: 'after' }
     );
+
+    if (review.itemId) {
+      await updateMenuItemRating(review.itemId);
+    }
 
     res.json({
       success: true,
@@ -286,9 +454,6 @@ export async function deleteReview(req, res, next) {
     const isAdmin = req.user.role === 'admin';
     const isOwner = review.customerId.toString() === req.user._id.toString();
 
-    // Admins can remove policy-violating reviews (spam, abuse, fakes).
-    // Customers can only delete their own review.
-    // Vendors are explicitly blocked — they cannot suppress critical customer feedback.
     if (!isAdmin && !isOwner) {
       return res.status(403).json({
         success: false,
@@ -297,6 +462,10 @@ export async function deleteReview(req, res, next) {
     }
 
     await reviewsCol.deleteOne({ _id: new ObjectId(reviewId) });
+
+    if (review.itemId) {
+      await updateMenuItemRating(review.itemId);
+    }
 
     res.json({
       success: true,

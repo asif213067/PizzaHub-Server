@@ -3,6 +3,8 @@ import {
   addReview,
   getItemReviews,
   getVendorReviews,
+  getMyReviews,
+  getReviewByOrderId,
   updateReview,
   deleteReview,
 } from '../controllers/reviewController.js';
@@ -12,6 +14,12 @@ const router = Router();
 
 // Public: anyone can read reviews for a menu item.
 router.get('/item/:itemId', getItemReviews);
+
+// Customer: get review for a specific order.
+router.get('/order/:orderId', verifyToken, requireCustomer, getReviewByOrderId);
+
+// Customer: get all my reviews.
+router.get('/my-reviews', verifyToken, requireCustomer, getMyReviews);
 
 // Vendor: view reviews for their own products only.
 router.get('/vendor', verifyToken, requireVendor, getVendorReviews);

@@ -166,6 +166,31 @@ export async function getCustomerOrders(req, res, next) {
         },
       },
       {
+        $lookup: {
+          from: "reviews",
+          let: { oId: "$_id" },
+          pipeline: [
+            {
+              $match: {
+                $expr: {
+                  $or: [
+                    { $eq: ["$orderId", "$$oId"] },
+                    { $eq: [{ $toString: "$orderId" }, { $toString: "$$oId" }] },
+                  ],
+                },
+              },
+            },
+          ],
+          as: "review",
+        },
+      },
+      {
+        $unwind: {
+          path: "$review",
+          preserveNullAndEmptyArrays: true,
+        },
+      },
+      {
         $project: {
           deliveryDate: 1,
           deliveryAddress: 1,
@@ -173,6 +198,7 @@ export async function getCustomerOrders(req, res, next) {
           status: 1,
           createdAt: 1,
           updatedAt: 1,
+          review: 1,
           item: {
             _id: "$item._id",
             itemName: "$item.itemName",
@@ -509,6 +535,31 @@ export async function getOrderById(req, res, next) {
       {
         $unwind: {
           path: "$customer",
+          preserveNullAndEmptyArrays: true,
+        },
+      },
+      {
+        $lookup: {
+          from: "reviews",
+          let: { oId: "$_id" },
+          pipeline: [
+            {
+              $match: {
+                $expr: {
+                  $or: [
+                    { $eq: ["$orderId", "$$oId"] },
+                    { $eq: [{ $toString: "$orderId" }, { $toString: "$$oId" }] },
+                  ],
+                },
+              },
+            },
+          ],
+          as: "review",
+        },
+      },
+      {
+        $unwind: {
+          path: "$review",
           preserveNullAndEmptyArrays: true,
         },
       },
