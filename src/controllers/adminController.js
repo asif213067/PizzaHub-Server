@@ -4,23 +4,22 @@ import { getCollection } from '../config/db.js';
 export async function getOverviewStats(req, res, next) {
   try {
     const usersCol = getCollection('users');
+    const userCol = getCollection('user');
     const menuCol = getCollection('menuItems');
     const ordersCol = getCollection('orders');
     const transCol = getCollection('transactions');
 
     const [
-      totalUsers,
-      totalVendors,
-      totalCustomers,
+      usersList,
+      userList,
       totalMenuItems,
       pendingMenuItems,
       totalOrders,
       totalTransactions,
       revenueResult,
     ] = await Promise.all([
-      usersCol.countDocuments({}),
-      usersCol.countDocuments({ role: 'vendor' }),
-      usersCol.countDocuments({ role: 'customer' }),
+      usersCol.find({}, { projection: { email: 1, role: 1 } }).toArray(),
+      userCol.find({}, { projection: { email: 1, role: 1 } }).toArray(),
       menuCol.countDocuments({}),
       menuCol.countDocuments({ status: 'pending' }),
       ordersCol.countDocuments({}),
@@ -32,6 +31,20 @@ export async function getOverviewStats(req, res, next) {
         ])
         .toArray(),
     ]);
+
+    // Deduplicate across both users and user collections
+    const allUsersMap = new Map();
+    for (const u of usersList) {
+      if (u.email) allUsersMap.set(u.email.toLowerCase(), u);
+    }
+    for (const u of userList) {
+      if (u.email) allUsersMap.set(u.email.toLowerCase(), u);
+    }
+
+    const uniqueUsers = Array.from(allUsersMap.values());
+    const totalUsers = uniqueUsers.length;
+    const totalVendors = uniqueUsers.filter((u) => u.role === 'vendor').length;
+    const totalCustomers = uniqueUsers.filter((u) => u.role === 'customer').length;
 
     const totalRevenue = revenueResult.length > 0 ? revenueResult[0].total : 0;
 
@@ -72,28 +85,45 @@ export async function getUsers(req, res, next) {
 
     const pageNum = Math.max(1, parseInt(page, 10) || 1);
     const limitNum = Math.max(1, parseInt(limit, 10) || 20);
-    const skip = (pageNum - 1) * limitNum;
 
     const usersCol = getCollection('users');
+    const userCol = getCollection('user');
 
-    const [users, totalCount] = await Promise.all([
-      usersCol
-        .find(query, { projection: { password: 0 } })
-        .sort({ createdAt: -1 })
-        .skip(skip)
-        .limit(limitNum)
-        .toArray(),
-      usersCol.countDocuments(query),
+    const [usersFromUsers, usersFromUser] = await Promise.all([
+      usersCol.find(query, { projection: { password: 0 } }).toArray(),
+      userCol.find(query, { projection: { password: 0 } }).toArray(),
     ]);
+
+    // Merge and deduplicate by email
+    const usersMap = new Map();
+    for (const u of usersFromUsers) {
+      if (u.email) usersMap.set(u.email.toLowerCase(), u);
+    }
+    for (const u of usersFromUser) {
+      if (u.email) {
+        const existing = usersMap.get(u.email.toLowerCase());
+        usersMap.set(u.email.toLowerCase(), { ...existing, ...u });
+      }
+    }
+
+    const allUsers = Array.from(usersMap.values()).sort((a, b) => {
+      const dateA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+      const dateB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+      return dateB - dateA;
+    });
+
+    const totalCount = allUsers.length;
+    const skip = (pageNum - 1) * limitNum;
+    const paginatedUsers = allUsers.slice(skip, skip + limitNum);
 
     res.json({
       success: true,
-      data: users,
+      data: paginatedUsers,
       pagination: {
         total: totalCount,
         page: pageNum,
         limit: limitNum,
-        totalPages: Math.ceil(totalCount / limitNum),
+        totalPages: Math.ceil(totalCount / limitNum) || 1,
       },
     });
   } catch (error) {
@@ -122,12 +152,17 @@ export async function toggleBlockUser(req, res, next) {
     }
 
     const usersCol = getCollection('users');
+    const userCol = getCollection('user');
+
     let targetUserQuery = { _id: id };
     if (ObjectId.isValid(id)) {
       targetUserQuery = { $or: [{ _id: new ObjectId(id) }, { _id: id }] };
     }
 
-    const targetUser = await usersCol.findOne(targetUserQuery);
+    let targetUser = await usersCol.findOne(targetUserQuery);
+    if (!targetUser) {
+      targetUser = await userCol.findOne(targetUserQuery);
+    }
 
     if (!targetUser) {
       return res.status(404).json({
@@ -144,11 +179,21 @@ export async function toggleBlockUser(req, res, next) {
       });
     }
 
-    const updated = await usersCol.findOneAndUpdate(
-      targetUserQuery,
-      { $set: { isBlocked, updatedAt: new Date() } },
-      { returnDocument: 'after', projection: { password: 0 } }
-    );
+    // Update in both collections so state is uniform
+    const [resUsers, resUser] = await Promise.all([
+      usersCol.findOneAndUpdate(
+        targetUserQuery,
+        { $set: { isBlocked, updatedAt: new Date() } },
+        { returnDocument: 'after', projection: { password: 0 } }
+      ),
+      userCol.findOneAndUpdate(
+        targetUserQuery,
+        { $set: { isBlocked, updatedAt: new Date() } },
+        { returnDocument: 'after', projection: { password: 0 } }
+      ),
+    ]);
+
+    const updated = resUser || resUsers;
 
     res.json({
       success: true,
@@ -176,13 +221,25 @@ export async function getTransactions(req, res, next) {
           from: 'users',
           localField: 'vendorId',
           foreignField: '_id',
-          as: 'vendor',
+          as: 'vendorUsers',
         },
       },
       {
-        $unwind: {
-          path: '$vendor',
-          preserveNullAndEmptyArrays: true,
+        $lookup: {
+          from: 'user',
+          localField: 'vendorId',
+          foreignField: '_id',
+          as: 'vendorUser',
+        },
+      },
+      {
+        $addFields: {
+          vendor: {
+            $ifNull: [
+              { $arrayElemAt: ['$vendorUsers', 0] },
+              { $arrayElemAt: ['$vendorUser', 0] },
+            ],
+          },
         },
       },
       {

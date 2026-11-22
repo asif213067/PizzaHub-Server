@@ -56,17 +56,38 @@ export async function updateProfile(req, res, next) {
 
     updateDoc.updatedAt = new Date();
 
-    const usersCol = getCollection('users');
-    let query = { _id: req.user._id };
-    if (ObjectId.isValid(req.user._id)) {
-      query = { $or: [{ _id: new ObjectId(req.user._id) }, { _id: req.user._id }] };
+    const conditions = [];
+    if (req.user._id) {
+      if (ObjectId.isValid(req.user._id)) {
+        conditions.push({ _id: new ObjectId(req.user._id) });
+      }
+      conditions.push({ _id: req.user._id });
+      conditions.push({ _id: req.user._id.toString() });
+    }
+    if (req.user.email) {
+      conditions.push({ email: req.user.email });
     }
 
-    const updatedUser = await usersCol.findOneAndUpdate(
-      query,
-      { $set: updateDoc },
-      { returnDocument: 'after', projection: { password: 0 } }
-    );
+    const query = conditions.length > 1 ? { $or: conditions } : conditions[0] || {};
+
+    const usersCol = getCollection('users');
+    const userCol = getCollection('user');
+
+    // Update in both Better Auth ('user') and custom ('users') collections to guarantee persistence
+    const [updatedInUsers, updatedInUser] = await Promise.all([
+      usersCol.findOneAndUpdate(
+        query,
+        { $set: updateDoc },
+        { returnDocument: 'after', projection: { password: 0 } }
+      ),
+      userCol.findOneAndUpdate(
+        query,
+        { $set: updateDoc },
+        { returnDocument: 'after', projection: { password: 0 } }
+      ),
+    ]);
+
+    const updatedUser = updatedInUser || updatedInUsers;
 
     res.json({
       success: true,

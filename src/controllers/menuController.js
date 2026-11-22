@@ -48,13 +48,25 @@ export async function getPublicMenuItems(req, res, next) {
           from: 'users',
           localField: 'vendorId',
           foreignField: '_id',
-          as: 'vendor',
+          as: 'vendorUsers',
         },
       },
       {
-        $unwind: {
-          path: '$vendor',
-          preserveNullAndEmptyArrays: true,
+        $lookup: {
+          from: 'user',
+          localField: 'vendorId',
+          foreignField: '_id',
+          as: 'vendorUser',
+        },
+      },
+      {
+        $addFields: {
+          vendor: {
+            $ifNull: [
+              { $arrayElemAt: ['$vendorUsers', 0] },
+              { $arrayElemAt: ['$vendorUser', 0] },
+            ],
+          },
         },
       },
       {
@@ -121,13 +133,25 @@ export async function getMenuItemById(req, res, next) {
           from: 'users',
           localField: 'vendorId',
           foreignField: '_id',
-          as: 'vendor',
+          as: 'vendorUsers',
         },
       },
       {
-        $unwind: {
-          path: '$vendor',
-          preserveNullAndEmptyArrays: true,
+        $lookup: {
+          from: 'user',
+          localField: 'vendorId',
+          foreignField: '_id',
+          as: 'vendorUser',
+        },
+      },
+      {
+        $addFields: {
+          vendor: {
+            $ifNull: [
+              { $arrayElemAt: ['$vendorUsers', 0] },
+              { $arrayElemAt: ['$vendorUser', 0] },
+            ],
+          },
         },
       },
       {
@@ -208,13 +232,25 @@ export async function getRelatedMenuItems(req, res, next) {
           from: 'users',
           localField: 'vendorId',
           foreignField: '_id',
-          as: 'vendor',
+          as: 'vendorUsers',
         },
       },
       {
-        $unwind: {
-          path: '$vendor',
-          preserveNullAndEmptyArrays: true,
+        $lookup: {
+          from: 'user',
+          localField: 'vendorId',
+          foreignField: '_id',
+          as: 'vendorUser',
+        },
+      },
+      {
+        $addFields: {
+          vendor: {
+            $ifNull: [
+              { $arrayElemAt: ['$vendorUsers', 0] },
+              { $arrayElemAt: ['$vendorUser', 0] },
+            ],
+          },
         },
       },
       {
@@ -550,13 +586,25 @@ export async function getAllMenuItemsAdmin(req, res, next) {
           from: 'users',
           localField: 'vendorId',
           foreignField: '_id',
-          as: 'vendor',
+          as: 'vendorUsers',
         },
       },
       {
-        $unwind: {
-          path: '$vendor',
-          preserveNullAndEmptyArrays: true,
+        $lookup: {
+          from: 'user',
+          localField: 'vendorId',
+          foreignField: '_id',
+          as: 'vendorUser',
+        },
+      },
+      {
+        $addFields: {
+          vendor: {
+            $ifNull: [
+              { $arrayElemAt: ['$vendorUsers', 0] },
+              { $arrayElemAt: ['$vendorUser', 0] },
+            ],
+          },
         },
       },
       {
