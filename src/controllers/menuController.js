@@ -308,7 +308,8 @@ export async function createMenuItem(req, res, next) {
     }
 
     const menuCol = getCollection('menuItems');
-    const isPremium = req.user.subscriptionPlan === 'premium';
+    const isExpired = req.user.subscriptionExpiresAt && new Date(req.user.subscriptionExpiresAt) < new Date();
+    const isPremium = req.user.subscriptionPlan === 'premium' && !isExpired;
 
     // Free tier vendors are strictly limited to at most 3 active/pending menu items.
     if (!isPremium) {
@@ -391,6 +392,40 @@ export async function updateMenuItem(req, res, next) {
     }
 
     const { itemName, category, description, price, location, images, status, isActive } = req.body;
+
+    // Enforce Free tier limit when reactivating an item
+    const isReactivating =
+      (isActive === true && (!item.isActive || item.status === 'inactive')) ||
+      (status === 'approved' && item.status === 'inactive');
+
+    if (isReactivating && req.user.role === 'vendor') {
+      const isExpired = req.user.subscriptionExpiresAt && new Date(req.user.subscriptionExpiresAt) < new Date();
+      const isPremium = req.user.subscriptionPlan === 'premium' && !isExpired;
+
+      if (!isPremium) {
+        const matchVendor = [
+          { vendorId: req.user._id },
+          { vendorId: req.user._id.toString() },
+        ];
+        if (ObjectId.isValid(req.user._id)) {
+          matchVendor.push({ vendorId: new ObjectId(req.user._id) });
+        }
+
+        const activeCount = await menuCol.countDocuments({
+          $or: matchVendor,
+          _id: { $ne: new ObjectId(id) },
+          status: { $in: ['approved', 'pending'] },
+        });
+
+        if (activeCount >= 3) {
+          return res.status(403).json({
+            success: false,
+            message: 'Free tier limit reached (max 3 active items). Upgrade to Premium to activate more menu items.',
+          });
+        }
+      }
+    }
+
     const updateDoc = {};
 
     if (itemName !== undefined) updateDoc.itemName = itemName.trim();

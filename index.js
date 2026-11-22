@@ -9,6 +9,7 @@ import menuRoutes from './src/routes/menuRoutes.js';
 import orderRoutes from './src/routes/orderRoutes.js';
 import adminRoutes from './src/routes/adminRoutes.js';
 import paymentRoutes from './src/routes/paymentRoutes.js';
+import { handleStripeWebhook } from './src/controllers/paymentController.js';
 import userRoutes from './src/routes/userRoutes.js';
 import reviewRoutes from './src/routes/reviewRoutes.js';
 import favoriteRoutes from './src/routes/favoriteRoutes.js';
@@ -25,7 +26,10 @@ app.use(
 
 // Stripe webhooks require the raw Buffer body to verify cryptographic signatures.
 app.use((req, res, next) => {
-  if (req.originalUrl === '/api/payments/webhook') {
+  if (
+    req.originalUrl.startsWith('/api/payments/webhook') ||
+    req.originalUrl.startsWith('/api/webhooks/stripe')
+  ) {
     next();
   } else {
     express.json()(req, res, next);
@@ -48,6 +52,7 @@ app.use('/api/orders', orderRoutes);
 app.use('/api/v1/orders', orderRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/payments', paymentRoutes);
+app.post('/api/webhooks/stripe', express.raw({ type: '*/*' }), handleStripeWebhook);
 app.use('/api/users', userRoutes);
 app.use('/api/reviews', reviewRoutes);
 app.use('/api/favorites', favoriteRoutes);
