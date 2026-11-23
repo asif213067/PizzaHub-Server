@@ -7,13 +7,17 @@ import {
   getReviewByOrderId,
   updateReview,
   deleteReview,
+  getAllReviewsAdmin,
 } from '../controllers/reviewController.js';
-import { verifyToken, requireCustomer, requireVendor } from '../middleware/auth.js';
+import { verifyToken, requireCustomer, requireVendor, requireAdmin } from '../middleware/auth.js';
 
 const router = Router();
 
 // Public: anyone can read reviews for a menu item.
 router.get('/item/:itemId', getItemReviews);
+
+// Admin: get all customer reviews across all vendors.
+router.get('/admin/all', verifyToken, requireAdmin, getAllReviewsAdmin);
 
 // Customer: get review for a specific order.
 router.get('/order/:orderId', verifyToken, requireCustomer, getReviewByOrderId);

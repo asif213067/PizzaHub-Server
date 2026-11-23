@@ -8,6 +8,7 @@ export async function getOverviewStats(req, res, next) {
     const menuCol = getCollection('menuItems');
     const ordersCol = getCollection('orders');
     const transCol = getCollection('transactions');
+    const reviewsCol = getCollection('reviews');
 
     const [
       usersList,
@@ -16,6 +17,7 @@ export async function getOverviewStats(req, res, next) {
       pendingMenuItems,
       totalOrders,
       totalTransactions,
+      totalReviews,
       revenueResult,
     ] = await Promise.all([
       usersCol.find({}, { projection: { email: 1, role: 1 } }).toArray(),
@@ -24,6 +26,7 @@ export async function getOverviewStats(req, res, next) {
       menuCol.countDocuments({ status: 'pending' }),
       ordersCol.countDocuments({}),
       transCol.countDocuments({}),
+      reviewsCol.countDocuments({}),
       transCol
         .aggregate([
           { $match: { status: { $in: ['succeeded', 'completed', 'paid'] } } },
@@ -57,6 +60,7 @@ export async function getOverviewStats(req, res, next) {
         totalMenuItems,
         pendingMenuItems,
         totalOrders,
+        totalReviews,
         totalTransactions,
         totalRevenue,
       },

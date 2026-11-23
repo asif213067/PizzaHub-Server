@@ -475,3 +475,129 @@ export async function deleteReview(req, res, next) {
     next(error);
   }
 }
+
+// ─── ADMIN: GET ALL REVIEWS ACROSS ALL VENDORS ──────────────────────────────
+
+export async function getAllReviewsAdmin(req, res, next) {
+  try {
+    const { search, rating, page = 1, limit = 20 } = req.query;
+
+    const pageNum = Math.max(1, parseInt(page, 10) || 1);
+    const limitNum = Math.max(1, parseInt(limit, 10) || 20);
+    const skip = (pageNum - 1) * limitNum;
+
+    const matchStage = {};
+    if (rating && rating !== 'all') {
+      const numericRating = Number(rating);
+      if (!isNaN(numericRating)) {
+        matchStage.rating = numericRating;
+      }
+    }
+
+    const reviewsCol = getCollection('reviews');
+
+    const pipeline = [
+      ...(Object.keys(matchStage).length > 0 ? [{ $match: matchStage }] : []),
+      {
+        $lookup: {
+          from: 'menuItems',
+          localField: 'itemId',
+          foreignField: '_id',
+          as: 'menuItemArr',
+        },
+      },
+      {
+        $lookup: {
+          from: 'users',
+          localField: 'vendorId',
+          foreignField: '_id',
+          as: 'vendorUsers',
+        },
+      },
+      {
+        $lookup: {
+          from: 'user',
+          localField: 'vendorId',
+          foreignField: '_id',
+          as: 'vendorUser',
+        },
+      },
+      {
+        $addFields: {
+          menuItem: { $arrayElemAt: ['$menuItemArr', 0] },
+          vendor: {
+            $ifNull: [
+              { $arrayElemAt: ['$vendorUsers', 0] },
+              { $arrayElemAt: ['$vendorUser', 0] },
+            ],
+          },
+        },
+      },
+    ];
+
+    if (search && search.trim()) {
+      const searchRegex = { $regex: search.trim(), $options: 'i' };
+      pipeline.push({
+        $match: {
+          $or: [
+            { customerName: searchRegex },
+            { comment: searchRegex },
+            { 'menuItem.itemName': searchRegex },
+            { 'vendor.businessName': searchRegex },
+            { 'vendor.name': searchRegex },
+          ],
+        },
+      });
+    }
+
+    pipeline.push(
+      {
+        $project: {
+          _id: 1,
+          orderId: 1,
+          itemId: 1,
+          vendorId: 1,
+          customerId: 1,
+          customerName: 1,
+          customerImage: 1,
+          rating: 1,
+          comment: 1,
+          verifiedPurchase: 1,
+          createdAt: 1,
+          updatedAt: 1,
+          itemName: { $ifNull: ['$menuItem.itemName', 'Custom Pizza'] },
+          itemImage: { $arrayElemAt: ['$menuItem.images', 0] },
+          itemCategory: { $ifNull: ['$menuItem.category', 'Classic Pizzas'] },
+          vendorName: {
+            $ifNull: ['$vendor.businessName', { $ifNull: ['$vendor.name', 'Pizzeria Partner'] }],
+          },
+          vendorEmail: '$vendor.email',
+        },
+      },
+      { $sort: { createdAt: -1 } }
+    );
+
+    const countPipeline = [...pipeline];
+    countPipeline.push({ $count: 'total' });
+
+    const [reviews, countResult] = await Promise.all([
+      reviewsCol.aggregate([...pipeline, { $skip: skip }, { $limit: limitNum }]).toArray(),
+      reviewsCol.aggregate(countPipeline).toArray(),
+    ]);
+
+    const totalCount = countResult.length > 0 ? countResult[0].total : 0;
+
+    res.json({
+      success: true,
+      data: reviews,
+      pagination: {
+        total: totalCount,
+        page: pageNum,
+        limit: limitNum,
+        totalPages: Math.ceil(totalCount / limitNum) || 1,
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+}
