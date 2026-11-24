@@ -65,8 +65,8 @@ flowchart LR
 
 1. **JWT Issuance & Better Auth Sync:** Exposes `/api/auth/jwt` to issue authoritative signed tokens for users registered through Better Auth, looking across both `users` and `user` collections.
 2. **Authoritative RBAC (Role-Based Access Control):** Every request is verified against the database to guarantee that blocked users or role changes take effect immediately, independent of client state.
-3. **Menu Item Moderation Pipeline:**
-   - Vendor creates an item $\rightarrow$ Status is set to `pending`.
+3. **Menu Item Moderation Pipeline & Multi-Image Support:**
+   - Vendor creates or updates an item with up to 4 images (`images: string[]`) $\rightarrow$ Status is set to `pending`.
    - Admin approves or rejects $\rightarrow$ Status changes to `approved` or `rejected`.
    - Only `approved` items can be toggled `isActive: true` and displayed on the public menu.
 4. **Tier-Based Vendor Limits:**
@@ -77,18 +77,21 @@ flowchart LR
    - Vendors receive orders for their products $\rightarrow$ `accepted` or `rejected`.
    - Customer can cancel their order while it is `pending`.
    - Vendors are strictly prevented from ordering their own items.
-6. **Verified-Purchase Reviews:**
+6. **Verified-Purchase Reviews & Admin Moderation:**
    - Reviews are allowed **only** for orders with an `accepted` status.
    - Pending, rejected, or cancelled orders cannot be reviewed.
    - Duplicate reviews on the same order are blocked at the database level (`409 Conflict`).
-   - Automatically re-aggregates `rating` and `numReviews` across the menu item.
+   - Automatically re-aggregates `rating` and `numReviews` across the menu item on creation and deletion.
+   - Platform administrators have complete review moderation authority (`GET /api/admin/reviews` and `DELETE /api/reviews/:reviewId`).
 7. **Stripe Subscription Billing:**
    - Creates Stripe Checkout sessions for Monthly ($29.99) and Yearly ($287.90) Premium plans.
    - Handles raw Stripe webhook payloads to fulfill subscriptions upon payment.
    - Prevents duplicate active subscriptions.
 8. **Admin Governance & User Moderation:**
-   - Provides `/api/admin/overview` statistics on users, orders, revenue, and items.
+   - Provides `/api/admin/overview` statistics on users, orders, revenue, items, and reviews.
    - Instant user blocking (`PATCH /api/admin/users/:id/block`) that prevents subsequent JWT issuance.
+9. **Automated Database Index Initialization:**
+   - Server automatically initializes and ensures single and compound indexes across `menuItems`, `orders`, `reviews`, `transactions`, and `users` on startup via `initIndexes()`, eliminating full collection scans and optimizing continuous vendor order polling.
 
 ---
 
@@ -270,9 +273,10 @@ npm run seed:admin
 | `GET` | `/api/reviews/order/:orderId` | Customer | Get the review submitted for a specific order. |
 | `GET` | `/api/reviews/my-reviews` | Customer | Get all reviews authored by the authenticated customer. |
 | `GET` | `/api/reviews/vendor` | Vendor | Get all reviews submitted for any of the vendor's products. |
+| `GET` | `/api/reviews/admin/all` | Admin | Retrieve all customer reviews across all vendor products with pagination and filters. |
 | `POST` | `/api/reviews` | Customer | Post a review (1–5 rating + comment) on an `accepted` order. |
 | `PATCH`| `/api/reviews/:reviewId` | Customer | Edit customer's own review. |
-| `DELETE`| `/api/reviews/:reviewId` | Customer / Admin | Delete a review (customers can delete own; admins can delete any). |
+| `DELETE`| `/api/reviews/:reviewId` | Customer / Admin | Delete a review (customers can delete own; admins can delete any with auto rating recalculation). |
 
 ### Payments & Subscriptions (`/api/payments`)
 | Method | Endpoint | Access | Description |
@@ -296,6 +300,8 @@ npm run seed:admin
 | `GET` | `/api/admin/users` | Admin | Paginated list of registered customers and vendors with role filter. |
 | `PATCH`| `/api/admin/users/:id/block` | Admin | Block or unblock an account (`{ isBlocked: boolean }`). |
 | `GET` | `/api/admin/transactions` | Admin | Platform-wide payment transaction log. |
+| `GET` | `/api/admin/reviews` | Admin | List all platform customer reviews with pagination, rating filters, and search query. |
+| `DELETE`| `/api/admin/reviews/:reviewId` | Admin | Permanently delete any review with automatic menu item rating recalculation. |
 
 ### Favorites (`/api/favorites`)
 | Method | Endpoint | Access | Description |
@@ -316,6 +322,25 @@ npm run seed:admin
 | `reviews` | Verified purchase ratings | `orderId`, `itemId`, `vendorId`, `customerId`, `customerName`, `rating`, `comment`, `createdAt` |
 | `transactions` | Stripe payment logs | `vendorId`, `plan`, `amount`, `status`, `stripeSessionId`, `createdAt` |
 | `favorites` | Customer bookmarks | `userId`, `itemId`, `createdAt` |
+
+### Database Performance & Indexes (`initIndexes`)
+
+To ensure high-throughput query performance, sub-millisecond lookups, and to prevent full-collection scans across high-frequency endpoints (e.g. continuous 60-second vendor order polling), the server automatically initializes the following indexes on startup via `initIndexes()` in `src/config/db.js`:
+
+| Collection | Indexed Field(s) | Type / Direction | Optimization Target |
+| :--- | :--- | :---: | :--- |
+| `menuItems` | `{ status: 1, category: 1 }` | Compound | Fast public menu filtering and category searches |
+| `menuItems` | `{ vendorId: 1, status: 1 }` | Compound | Vendor dashboard items query and status checks |
+| `menuItems` | `{ createdAt: -1 }` | Single Descending | Sorting featured items and recent additions |
+| `orders` | `{ customerId: 1, createdAt: -1 }` | Compound | Customer `/api/orders/my-orders` history stream |
+| `orders` | `{ vendorId: 1, status: 1, createdAt: -1 }` | Compound | High-frequency 60s vendor polling `/api/orders/vendor-orders` |
+| `reviews` | `{ itemId: 1 }` | Single | Public menu item reviews and rating calculations |
+| `reviews` | `{ vendorId: 1 }` | Single | Vendor reviews overview and aggregate rating lookup |
+| `reviews` | `{ orderId: 1 }` | Single (Unique) | Prevents duplicate reviews per order at the database layer |
+| `reviews` | `{ customerId: 1 }` | Single | Customer review history |
+| `transactions` | `{ vendorId: 1, createdAt: -1 }` | Compound | Vendor billing history and subscription transaction log |
+| `users` | `{ email: 1 }` | Single (Unique) | Fast user credential lookup and JWT issuance |
+| `users` | `{ role: 1 }` | Single | Admin user management and role-based filtering |
 
 ---
 
